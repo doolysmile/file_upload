@@ -3,6 +3,8 @@ package com.ll.exam.app10.app.member.controller;
 import com.ll.exam.app10.app.member.entity.Member;
 import com.ll.exam.app10.app.member.service.MemberService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -11,13 +13,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSession;
+import java.security.Principal;
 
 @Controller
 @RequestMapping("/member")
 @RequiredArgsConstructor
 public class MemberController {
     private final MemberService memberService;
+    private final PasswordEncoder passwordEncoder;
 
     @GetMapping("/join")
     public String showJoin() {
@@ -25,35 +31,38 @@ public class MemberController {
     }
 
     @PostMapping("/join")
-    @ResponseBody
-    public String join(String username, String password, String email, MultipartFile profileImg, HttpSession session) {
+    public String join(HttpServletRequest req, String username, String password, String email, MultipartFile profileImg) throws ServletException {
         Member oldMember = memberService.getMemberByUsername(username);
 
         if (oldMember != null) {
             return "redirect:/?errorMsg=Already done.";
         }
 
-        Member member = memberService.join(username, "{noop}" + password, email, profileImg);
+        String passwordClearText = password;
 
-        session.setAttribute("loginedMemberId", member.getId());
+        password = passwordEncoder.encode(password);
 
-        return "member/profile";
+        Member member = memberService.join(username, password, email, profileImg);
+
+        try{
+            req.login(member.getUsername(), passwordClearText);
+        } catch (ServletException e){
+            throw new RuntimeException(e);
+        }
+        return "redirect:/member/profile";
     }
 
+    @PreAuthorize("isAuthenticated()")
     @GetMapping("/profile")
-    public String showProfile(HttpSession session, Model model) {
-        Long loginedMemberId = (Long) session.getAttribute("loginedMemberId");
-        boolean isLogined = loginedMemberId != null;
-
-        if (isLogined == false) {
+    public String showProfile(Principal principal, Model model) {
+        if (principal == null) {
             return "redirect:/?errorMsg=Need to login!";
         }
 
-        Member loginedMember = memberService.getMemberById(loginedMemberId);
+        Member loginedMember = memberService.getMemberByUsername(principal.getName());
 
         model.addAttribute("loginedMember", loginedMember);
 
         return "member/profile";
     }
-
 }
